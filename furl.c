@@ -1,4 +1,4 @@
-#define _GNU_SOURCE # allow aprintf
+#define _GNU_SOURCE // for asprintf
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -23,17 +23,17 @@ Options are:\n\
     -d          - POST data from stdin (use twice to url-encode it)\n\
     -f          - Follow HTTP redirects\n\
     -p pin      - Use pinned HTTPS public key\n\
-    -s          - Verify HTTPS public key\n\
+    -s          - Verify HTTPS signature\n\
     -t seconds  - Set transaction timeout\n\
     -z          - Output debug data\n\
 \n\
-See https://github/glitchub/furl/README for more details.\n\
+See https://github.com/glitchub/furl/blob/master/README for more details.\n\
 ");
 }
 
 // This is called for each response header line. Scrape the HTTP status from header
 // "HTTP/xxx NNN reason". Note there may be multiple of these, we always want the last.
-char *status = NULL;    // Contains the "NNN reason"
+char *status = NULL; // Points to "NNN reason"
 int header_callback(char *data, size_t size, size_t nmemb, void *user)
 {
     (void) user;
@@ -54,20 +54,20 @@ int header_callback(char *data, size_t size, size_t nmemb, void *user)
     return size;
 }
 
-#define curlopt(curl,opt,arg) do { CURLcode res = curl_easy_setopt(curl,opt,arg); if (res) die(#opt ": %s\n", curl_easy_strerror(res)); } while(0)
+#define curlopt(curl,opt,arg) do { CURLcode res = curl_easy_setopt(curl,opt,arg); if (res) die(#opt ": %s\n", curl_easy_strerror(res)); } while (0)
 
 int main(int argc, char *argv[])
 {
-    bool validate = false;
-    char *pin = NULL;
     int post = 0;
     bool follow = false;
-    bool debug = false;
+    char *pin = NULL;
+    bool validate = false;
     char *timeout = NULL;
+    bool debug = false;
 
     while(1) switch(getopt(argc, argv,":dfp:st:z"))
     {
-        case 'd': post++; break;
+        case 'd': post++; break;            // Once = post raw, twice = post url-encoded
         case 'f': follow = true; break;
         case 'p': pin = optarg; break;
         case 's': validate = true; break;
@@ -86,54 +86,56 @@ int main(int argc, char *argv[])
 
     curlopt(curl, CURLOPT_URL, url);
     curlopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP|CURLPROTO_HTTPS);
-
-    if (follow) curlopt(curl, CURLOPT_FOLLOWLOCATION, 1);
-
-    if (!validate)
-    {
-        curlopt(curl, CURLOPT_SSL_VERIFYHOST, 0);   // ignore signatures
-        curlopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
-        curlopt(curl, CURLOPT_CAINFO, NULL);        // don't bother to load certs
-    }
-
-    if (pin)
-    {
-        char *s;
-        if (asprintf(&s, "sha256//%s", pin) < 0) die("Out of memory!\n");   // pre-pend the magic header
-        curlopt(curl, CURLOPT_PINNEDPUBLICKEY, s);
-        free(s);
-    }
+    curlopt(curl, CURLOPT_HEADERFUNCTION, header_callback); // extracts the HTTP status string
 
     if (post)
     {
         // slurp stdin
-        char *input = malloc(8192);
-        OOM(input);
+        char *input = NULL;
         size_t size = 0;
-        while(1)
+        while (true)
         {
-            size_t got = fread(input+size, 1, 8192, stdin);
+            #define CHUNK 8192
+            input = input ? realloc(input, size+CHUNK) : malloc(CHUNK);
+            OOM(input);
+            size_t got = fread(input+size, 1, CHUNK, stdin);
             if (!got) break;
             size += got;
-            input=realloc(input, size+8192);
-            OOM(input);
         }
 
-        curlopt(curl, CURLOPT_POST, 1);
-        if (post == 1)
+        if (!size) free(input);
+        else if (post == 1)
         {
-            // send binary, set size before copypostfields
+            // send binary, note *input must not be freed
             curlopt(curl, CURLOPT_POSTFIELDSIZE, size);
-            curlopt(curl, CURLOPT_COPYPOSTFIELDS, input);
+            curlopt(curl, CURLOPT_POSTFIELDS, input);
+            curlopt(curl, CURLOPT_POST, 1);
         } else
         {
-            // send url-encoded
+            // send url-encoded, note *encoded must not be freed
             char *encoded = curl_easy_escape(curl, input, size);
             OOM(encoded);
-            curlopt(curl, CURLOPT_COPYPOSTFIELDS, encoded); // will invoke strlen()
-            curl_free(encoded);
+            free(input);
+            curlopt(curl, CURLOPT_POSTFIELDS, encoded); // will invoke strlen()
+            curlopt(curl, CURLOPT_POST, 1);
         }
-        free(input);
+    }
+
+    if (follow) curlopt(curl, CURLOPT_FOLLOWLOCATION, 1);
+
+    if (pin)
+    {
+        char *s;
+        if (asprintf(&s, "sha256//%s", pin) < 0) die("Out of memory!\n"); // pre-pend the magic header
+        curlopt(curl, CURLOPT_PINNEDPUBLICKEY, s);
+        free(s);
+    }
+
+    if (!validate)
+    {
+        curlopt(curl, CURLOPT_SSL_VERIFYHOST, 0); // ignore signatures
+        curlopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
+        curlopt(curl, CURLOPT_CAINFO, NULL); // don't bother to load certs
     }
 
     if (timeout)
@@ -145,8 +147,6 @@ int main(int argc, char *argv[])
     }
 
     if (debug) curlopt(curl, CURLOPT_VERBOSE, 1);
-
-    curlopt(curl, CURLOPT_HEADERFUNCTION, header_callback); // extracts the HTTP status string
 
     CURLcode res = curl_easy_perform(curl);
     curl_easy_cleanup(curl);
