@@ -1,0 +1,40 @@
+furl - a linux command line utility that fetches and prints the contents of
+the designated HTTP/HTTPS URL. This is a simplified lightweight embeddedable
+replacement for the curl CLI program, for use with scripted control systems.
+
+Usage:
+
+    furl [options] URL
+
+Options are:
+
+    -d          - POST data from stdin (use twice to url-encode it)
+    -f          - Follow HTTP redirects
+    -p pin      - Use pinned HTTPS public key
+    -s          - Verify HTTPS public key
+    -t seconds  - Set transaction timeout
+    -z          - Output debug data
+
+Fetched content is always printed to stdout. Error and debug messages are
+always printed to stderr.
+
+Exit status can be one of:
+
+    0 = Content fetched and printed successfully
+    1 = Operational error (malformed command or URL, invalid cetificate, etc)
+    2 = Server's HTTP status was not 2XX
+
+HTTPS verification is disabled by default, and furl will work as expected with
+self-signed certificates.
+
+Use -s to enable normal HTTPS certificate verification, but note this requires
+functional DNS, use of resolvable hostnames, and a certificate store in the
+proper location.
+
+Use -p to enable pinned HTTPS public key, this will work with numeric IP
+addresses and has no dependence on DNS or certificate infrastructure. The pin
+is a BASE64-encoded SHA256 of a specific HTTPS key, connections can only
+proceed for servers using that key. For an existing host the easiest way to
+determine the pin is:
+
+  ./furl -px -z https://the.target.server 2>&1 | awk -F' sha256//' '/public key hash/{print $2}'
