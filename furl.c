@@ -10,7 +10,7 @@
 
 #define die(...) fprintf(stderr,__VA_ARGS__), exit(1)
 
-#define OOM(s) if (!s) die("Out of memory\n")
+#define OOM(s) if (!(s)) die("Out of memory\n")
 
 static void usage(void)
 {
@@ -45,10 +45,10 @@ int header_callback(char *data, size_t size, size_t nmemb, void *user)
         while (start < bytes && isspace(data[start])) start++;
         if (start < bytes)
         {
-            int end=bytes;  // find last non-whitespace
+            int end = bytes;  // find last non-whitespace
             while (end > start && isspace(data[end-1])) end--;
             if (status) free(status);
-            if (asprintf(&status, "%.*s", end - start, data + start) < 0) die("Out of memory!\n");
+            OOM(asprintf(&status, "%.*s", end - start, data + start) > 0);
         }
     }
     return size;
@@ -126,7 +126,7 @@ int main(int argc, char *argv[])
     if (pin)
     {
         char *s;
-        if (asprintf(&s, "sha256//%s", pin) < 0) die("Out of memory!\n"); // pre-pend the magic header
+        OOM(asprintf(&s, "sha256//%s", pin) > 0); // pre-pend the magic header
         curlopt(curl, CURLOPT_PINNEDPUBLICKEY, s);
         free(s);
     }
